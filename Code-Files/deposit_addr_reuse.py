@@ -5,6 +5,7 @@ import asyncio
 import aiohttp
 import matplotlib.pyplot as plt
 from collections import Counter
+import time
 
 API_KEY = "BIYUJTNDT1C26ZIEP1YWT2AXUHFXVN5683"
 
@@ -36,24 +37,23 @@ class TripleEdge:
 
 
 async def process_api_request(session, block_num, api_key):
-    try:
-        resp = await session.get("https://api.etherscan.io/api?" +
-                "module=proxy" + 
-                "&action=eth_getBlockByNumber" +
-                "&tag=" + hex(block_num) +
-                "&boolean=true" + 
-                "&apikey=" + api_key)
-        return await resp.json()
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        print("Occured at BLOCK", block_num)
+    url = ("https://api.etherscan.io/api?" +
+            "module=proxy" + 
+            "&action=eth_getBlockByNumber" +
+            "&tag=" + hex(block_num) +
+            "&boolean=true" + 
+            "&apikey=" + api_key)
+    async with session.get(url) as response:
+        return await response.json()
 
 async def run_concurrent_requests(api_key, min_block, max_block):
     async with aiohttp.ClientSession() as session:
         tasks = []
 
         for block_tag in range(min_block, max_block):
-            tasks.append(process_api_request(session, block_tag, api_key))
+            task = asyncio.create_task(process_api_request(session, block_tag, api_key))
+            tasks.append(task)
+            await asyncio.sleep(1.0 / 3)
 
         return await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -63,14 +63,19 @@ def generate_transaction_data(api_key, min_block, max_block):
     transactions = []
     miners = []
 
-    for block_result in tasks:
+    for block_result, index in zip(tasks, range(min_block, max_block)):
         if isinstance(block_result, Exception):
             print("Error")
+            print(block_result)
             continue
         
-        miners.append(block_result["result"]["miner"])
+        try:
+            miners.append(block_result["result"]["miner"])
+        except:
+            print("Error")
+            print(block_result)
 
-        for transaction, index in zip(block_result['result']['transactions'], range(min_block, max_block)):
+        for transaction in block_result['result']['transactions']:
             receiver = transaction['to']
             sender = transaction['from']
             amount = transaction['value']
@@ -93,11 +98,14 @@ def generate_transaction_data(api_key, min_block, max_block):
 
 def generate_triple_paths(api_key, transactions_file, exchange_file, miner_file):
     # import and filter data
-    addr_exchanges = pd.read_csv(exchange_file)[' address']
+    addr_exchanges = pd.read_csv(exchange_file)[' address'].str.lower()
     addr_miners = pd.read_csv(miner_file)
     tx_df = pd.read_csv(transactions_file)
 
     # identify possible deposits
+    tx_df['Sender'] = tx_df['Sender'].str.lower()
+    tx_df['Receiver'] = tx_df['Receiver'].str.lower()
+
     possible_deposit_tx = tx_df[~tx_df['Sender'].isin(addr_exchanges) & tx_df['Receiver'].isin(addr_exchanges)]
     possible_deposits = possible_deposit_tx['Sender']
 
@@ -163,12 +171,13 @@ def generate_bar_chart(user_dict):
     plt.show()
 
 def start():
+    start_time = time.time()
     block_start = int(input('Start Block: '))
     block_end = int(input('End Block: '))
 
     exchanges = input("Exchange file (leave empty if default): ") or "data-collection/centralized_exchanges_data.csv"
-    amount_diff = float(input('Amount difference maximum: ') or 0.01)
-    block_diff = int(input('Block difference maximum: ') or 3200)
+    amount_diff = float(input('Amount difference maximum (leave empty if default): ') or 0.01)
+    block_diff = int(input('Block difference maximum (leave empty if default): ') or 3200)
 
     transactions, miners = generate_transaction_data(API_KEY, block_start, block_end)
     print("Data retrieved. Building graph...")
@@ -188,7 +197,11 @@ def start():
         writer.writerows(zip(*user_out.values()))
 
     print("User map saved to", fileout)
-    generate_bar_chart(user_out)
+    if num_users > 0:
+        generate_bar_chart(user_out)
+    end_time = time.time()
+
+    print("Runtime:", end_time - start_time)
 
 start()
 
