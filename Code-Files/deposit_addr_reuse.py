@@ -6,6 +6,7 @@ import aiohttp
 import matplotlib.pyplot as plt
 from collections import Counter
 import time
+import sys
 
 API_KEY = "BIYUJTNDT1C26ZIEP1YWT2AXUHFXVN5683"
 
@@ -22,12 +23,12 @@ class TripleEdge:
         self.sender = tx1['Sender']
         self.deposit = tx1['Receiver']
         self.exchange = tx2['Receiver']
-        self.value_1 = tx1['Value']
-        self.value_2 = tx2['Value']
+        self.value_1 = int(tx1['Value'], 16)
+        self.value_2 = int(tx2['Value'], 16)
         self.type_1 = tx1['Type']
         self.type_2 = tx2['Type']
-        self.block_1 = tx1['Block Number']
-        self.block_2 = tx2['Block Number']
+        self.block_1 = int(tx1['Block Number'])
+        self.block_2 = int(tx2['Block Number'])
 
     def __str__(self):
         return self.sender + ' -> ' + self.deposit + ' -> ' + self.exchange
@@ -36,28 +37,30 @@ class TripleEdge:
         return 'Starting Address:\t' + self.sender + '\nDeposit Address:\t' + self.deposit + '\nExchange Address:\t' + self.exchange
 
 
-async def process_api_request(session, block_num, api_key):
-    url = ("https://api.etherscan.io/api?" +
-            "module=proxy" + 
-            "&action=eth_getBlockByNumber" +
-            "&tag=" + hex(block_num) +
-            "&boolean=true" + 
-            "&apikey=" + api_key)
-    async with session.get(url) as response:
-        return await response.json()
+async def process_api_request(session, block_num, api_key, semaphore):
+    async with semaphore:
+        url = ("https://api.etherscan.io/api?" +
+                "module=proxy" + 
+                "&action=eth_getBlockByNumber" +
+                "&tag=" + hex(block_num) +
+                "&boolean=true" + 
+                "&apikey=" + api_key)
+        async with session.get(url) as response:
+            return await response.json()
 
 async def run_concurrent_requests(api_key, min_block, max_block):
     async with aiohttp.ClientSession() as session:
+        semaphore = asyncio.Semaphore(5)
         tasks = []
 
         for block_tag in range(min_block, max_block):
-            task = asyncio.create_task(process_api_request(session, block_tag, api_key))
+            task = asyncio.create_task(process_api_request(session, block_tag, api_key, semaphore))
             tasks.append(task)
-            await asyncio.sleep(1.0 / 3)
+            await asyncio.sleep(1)
 
         return await asyncio.gather(*tasks, return_exceptions=True)
 
-def generate_transaction_data(api_key, min_block, max_block):
+def generate_transaction_data(min_block, max_block, api_key=API_KEY):
     tasks = asyncio.run(run_concurrent_requests(api_key, min_block, max_block))
 
     transactions = []
@@ -170,16 +173,10 @@ def generate_bar_chart(user_dict):
     plt.legend()
     plt.show()
 
-def start():
+def start_complete(block_start, block_end, exchanges="data-collection/centralized_exchanges_data.csv", amount_diff=0.01, block_diff=3200):
     start_time = time.time()
-    block_start = int(input('Start Block: '))
-    block_end = int(input('End Block: '))
-
-    exchanges = input("Exchange file (leave empty if default): ") or "data-collection/centralized_exchanges_data.csv"
-    amount_diff = float(input('Amount difference maximum (leave empty if default): ') or 0.01)
-    block_diff = int(input('Block difference maximum (leave empty if default): ') or 3200)
-
-    transactions, miners = generate_transaction_data(API_KEY, block_start, block_end)
+    
+    transactions, miners = generate_transaction_data(block_start, block_end)
     print("Data retrieved. Building graph...")
 
     edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
@@ -203,7 +200,67 @@ def start():
 
     print("Runtime:", end_time - start_time)
 
-start()
+def start_from_csv(transactions, miners):
+    start_time = time.time()
+
+    exchanges = input("Exchange file (leave empty if default): ") or "data-collection/centralized_exchanges_data.csv"
+    amount_diff = float(input('Amount difference maximum (leave empty if default): ') or 0.01)
+    block_diff = int(input('Block difference maximum (leave empty if default): ') or 3200)
+
+    edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
+    print('Graph generated. Running deposit address reuse heuristic...')
+
+    num_ex, exchange_out, num_users, user_out = dar_heuristic_alg(edges, deposit_addr_list, amount_diff, block_diff)
+
+    print("Exchanges identified: ", num_ex)
+    print("Users identified: ", num_users)
+    
+    fileout = transactions.split('_transactions.csv')[0] + '_user_map.csv'
+
+    with open(fileout, mode='w') as file:
+        writer = csv.DictWriter(file, user_out.keys())
+        writer.writeheader()
+        writer.writerow(user_out)
+
+    print("User map saved to", fileout)
+    if num_users > 0:
+        generate_bar_chart(user_out)
+    end_time = time.time()
+
+    print("Runtime:", end_time - start_time)
+
+# start_from_csv('5000000_to_5001000_transactions.csv', '5000000_to_5001000_miners.csv')
+
+
+if sys.argv[1] == '-h':
+    print('===== Deposit Address Reuse Clustering =====')
+    print('start <min-block> <max-block> <exchange-file (optional)> <amount-difference-max (optional)> <block-difference-max (optional)>')
+    print('\t Compiles transaction data from <min-block> to <max-block> and runs clustering heuristic')
+    print('csv <transaction-file> <miner-file>')
+    print('\t Runs clustering heuristic on <transaction-file>')
+    print('tx <min-block> <max-block>')
+    print('\t Compiles transaction data from <min-block> to <max-block>')
+    print('============================================')
+elif sys.argv[1] == 'csv' and len(sys.argv) == 2:
+    try:
+        start_from_csv(int(sys.argv[2]), int(sys.argv[3]))
+    except:
+        print('Error... try again')
+elif sys.argv[1] == 'start':
+    try:
+        if len(sys.argv) == 6:
+            start_complete(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6])
+        else:
+            start_complete(sys.argv[2], sys.argv[3])
+    except:
+        print('Error... try again')
+elif sys.argv[1] == 'tx':
+    try:
+        generate_transaction_data(int(sys.argv[2]), int(sys.argv[3]))
+    except:
+        print('Error... try again')
+else:
+    print('Error... try again')
 
 #### TESTING #####
 # tx_file = 'test_tx.csv'
