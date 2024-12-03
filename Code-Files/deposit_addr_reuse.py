@@ -1,6 +1,8 @@
 import csv
 import requests as req
 import pandas as pd
+import asyncio
+import aiohttp
 
 API_KEY = "BIYUJTNDT1C26ZIEP1YWT2AXUHFXVN5683"
 
@@ -30,30 +32,50 @@ class TripleEdge:
     def __repr__(self):
         return 'Starting Address:\t' + self.sender + '\nDeposit Address:\t' + self.deposit + '\nExchange Address:\t' + self.exchange
 
-    
+
+async def process_api_request(session, block_num, api_key):
+    try:
+        resp = await session.get("https://api.etherscan.io/api?" +
+                "module=proxy" + 
+                "&action=eth_getBlockByNumber" +
+                "&tag=" + hex(block_num) +
+                "&boolean=true" + 
+                "&apikey=" + api_key)
+        return await resp.json()
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        print("Occured at BLOCK", block_num)
+
+async def run_concurrent_requests(api_key, min_block, max_block):
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+
+        for block_tag in range(min_block, max_block):
+            tasks.append(process_api_request(session, block_tag, api_key))
+
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
 def generate_transaction_data(api_key, min_block, max_block):
+    tasks = asyncio.run(run_concurrent_requests(api_key, min_block, max_block))
+
     transactions = []
     miners = []
 
-    for block_tag in range(min_block, max_block):
-        req_tx = req.get("https://api.etherscan.io/api?" +
-                "module=proxy" + 
-                "&action=eth_getBlockByNumber" +
-                "&tag=" + hex(block_tag) +
-                "&boolean=true" + 
-                "&apikey=" + api_key)
-        read_tx = req_tx.json()
+    for block_result in tasks:
+        if isinstance(block_result, Exception):
+            print("Error")
+            continue
+        
+        miners.append(block_result["result"]["miner"])
 
-        miners.append(read_tx["result"]["miner"])
-        for transaction in read_tx['result']['transactions']:
+        for transaction, index in zip(block_result['result']['transactions'], range(min_block, max_block)):
             receiver = transaction['to']
             sender = transaction['from']
             amount = transaction['value']
             type_tx = transaction['type']
-            temp_row = [block_tag, sender, receiver, amount, type_tx]
+            temp_row = [index, sender, receiver, amount, type_tx]
             transactions.append(temp_row)
-        
-    
+
     with open(str(min_block) + '_to_' + str(max_block) + '_' + "transactions.csv", 'w') as out_file:
         write = csv.writer(out_file)
         write.writerow(['Block Number', "Sender", "Receiver", "Value", "Type"])
@@ -62,7 +84,7 @@ def generate_transaction_data(api_key, min_block, max_block):
     with open(str(min_block) + '_to_' + str(max_block) + '_' + "miners.csv", 'w') as out_file:
         write = csv.writer(out_file)
         write.writerow(['miners'])
-        write.writerows(miners)
+        write.writerow(miners)
 
     return str(min_block) + '_to_' + str(max_block) + '_' + "transactions.csv", str(min_block) + '_to_' + str(max_block) + '_' + "miners.csv"
 
@@ -140,14 +162,23 @@ def start():
     block_diff = int(input('Block difference maximum: ') or 3200)
 
     transactions, miners = generate_transaction_data(API_KEY, block_start, block_end)
-    edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
+    print("Data retrieved. Building graph...")``
 
+    edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
     print('Graph generated. Running deposit address reuse heuristic...')
 
     num_ex, exchange_out, num_users, user_out = dar_heuristic_alg(edges, deposit_addr_list, amount_diff, block_diff)
 
     print("Exchanges identified: ", num_ex)
     print("Users identified: ", num_users)
+    
+    fileout = str(block_start) + '_to_' + str(block_end) + '_user_map.csv'
+    with open(fileout, mode='w') as file:
+        writer = csv.writer(file)
+        writer.writerow(user_out.keys())
+        writer.writerows(zip(*user_out.values()))
+
+    print("User map saved to", fileout)
 
 start()
 
