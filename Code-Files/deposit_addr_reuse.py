@@ -188,17 +188,18 @@ def start():
         writer.writerows(zip(*user_out.values()))
 
     print("User map saved to", fileout)
+    generate_bar_chart(user_out)
 
-# start()
+start()
 
 #### TESTING #####
-tx_file = 'test_tx.csv'
-ex_file = 'test_ex.csv'
-miner_file = 'miner_test.csv'
-edge_test, deposits_test = generate_triple_paths(API_KEY, tx_file, ex_file, miner_file)
-num_ex, ex, num_u, u = dar_heuristic_alg(edge_test, deposits_test.tolist())
-print("Exchanges found:", num_ex)
-print("Users found:", num_u)
+# tx_file = 'test_tx.csv'
+# ex_file = 'test_ex.csv'
+# miner_file = 'miner_test.csv'
+# edge_test, deposits_test = generate_triple_paths(API_KEY, tx_file, ex_file, miner_file)
+# num_ex, ex, num_u, u = dar_heuristic_alg(edge_test, deposits_test.tolist())
+# print("Exchanges found:", num_ex)
+# print("Users found:", num_u)
 
-print(u)
-generate_bar_chart(u)
+# print(u)
+# generate_bar_chart(u)
