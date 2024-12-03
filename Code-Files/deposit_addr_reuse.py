@@ -3,6 +3,8 @@ import requests as req
 import pandas as pd
 import asyncio
 import aiohttp
+import matplotlib.pyplot as plt
+from collections import Counter
 
 API_KEY = "BIYUJTNDT1C26ZIEP1YWT2AXUHFXVN5683"
 
@@ -153,6 +155,13 @@ def dar_heuristic_alg(edges, deposit_addr_list, a_max=1, t_max=10000):
 
     return num_exchange, exchange_map, num_user, user_map
 
+def generate_bar_chart(user_dict):
+    entities = Counter(list(user_dict.values()))
+
+    plt.bar(range(len(list(entities.keys()))), list(entities.values()), tick_label=list(entities.keys()), label="Entities")
+    plt.legend()
+    plt.show()
+
 def start():
     block_start = int(input('Start Block: '))
     block_end = int(input('End Block: '))
@@ -162,7 +171,7 @@ def start():
     block_diff = int(input('Block difference maximum: ') or 3200)
 
     transactions, miners = generate_transaction_data(API_KEY, block_start, block_end)
-    print("Data retrieved. Building graph...")``
+    print("Data retrieved. Building graph...")
 
     edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
     print('Graph generated. Running deposit address reuse heuristic...')
@@ -180,15 +189,16 @@ def start():
 
     print("User map saved to", fileout)
 
-start()
+# start()
 
-##### TESTING #####
-# tx_file = 'test_tx.csv'
-# ex_file = 'test_ex.csv'
-# miner_file = 'miner_test.csv'
-# edge_test, deposits_test = generate_triple_paths(API_KEY, tx_file, ex_file, miner_file)
-# num_ex, ex, num_u, u = dar_heuristic_alg(edge_test, deposits_test.tolist())
-# print("Exchanges found:", num_ex)
-# print("Users found:", num_u)
+#### TESTING #####
+tx_file = 'test_tx.csv'
+ex_file = 'test_ex.csv'
+miner_file = 'miner_test.csv'
+edge_test, deposits_test = generate_triple_paths(API_KEY, tx_file, ex_file, miner_file)
+num_ex, ex, num_u, u = dar_heuristic_alg(edge_test, deposits_test.tolist())
+print("Exchanges found:", num_ex)
+print("Users found:", num_u)
 
-# print(u)
+print(u)
+generate_bar_chart(u)
