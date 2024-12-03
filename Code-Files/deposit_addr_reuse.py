@@ -61,35 +61,36 @@ def generate_transaction_data(api_key, min_block, max_block):
     
     with open(str(min_block) + '_to_' + str(max_block) + '_' + "miners.csv", 'w') as out_file:
         write = csv.writer(out_file)
-        write.writerow(miners)
+        write.writerow(['miners'])
+        write.writerows(miners)
 
     return str(min_block) + '_to_' + str(max_block) + '_' + "transactions.csv", str(min_block) + '_to_' + str(max_block) + '_' + "miners.csv"
 
 
 def generate_triple_paths(api_key, transactions_file, exchange_file, miner_file):
-    addr_exchanges = pd.read_csv(exchange_file)[' address'].tolist()
-    addr_miners = pd.read_csv(miner_file).values.tolist()
-
+    # import and filter data
+    addr_exchanges = pd.read_csv(exchange_file)[' address']
+    addr_miners = pd.read_csv(miner_file)
     tx_df = pd.read_csv(transactions_file)
 
-    possible_deposits = tx_df.index[~tx_df['Sender'].isin(addr_exchanges) & tx_df['Receiver'].isin(addr_exchanges)].tolist()
-    possible_deposit_tx = tx_df.iloc[possible_deposits]
+    # identify possible deposits
+    possible_deposit_tx = tx_df[~tx_df['Sender'].isin(addr_exchanges) & tx_df['Receiver'].isin(addr_exchanges)]
+    possible_deposits = possible_deposit_tx['Sender']
 
     # possible starting points are not exchanges or miners and send to a deposit
-    starting_points = tx_df.index[~tx_df['Sender'].isin(addr_exchanges) & ~tx_df['Sender'].isin(addr_miners) & tx_df['Receiver'].isin(tx_df.iloc[possible_deposits]['Sender'])]
-    # use the indices to generate a list of the actual transaction objects 
-    starting_transactions = tx_df.iloc[starting_points]
+    starting_transactions = tx_df[~tx_df['Sender'].isin(addr_exchanges) & ~tx_df['Sender'].isin(addr_miners) & tx_df['Receiver'].isin(possible_deposits)]
 
     edge_set = []
 
     # loop through the possible starting addresses to determine which go to possible deposit addresses and use those transactions to construct an edge
     for index, start_tx in starting_transactions.iterrows():
-        to_deposit_index = possible_deposit_tx[start_tx['Receiver'] == possible_deposit_tx['Sender']].index.tolist()
-        for i in to_deposit_index:
-            tempObj = TripleEdge(start_tx, possible_deposit_tx.loc[i])
+        # identify transactions that start at that deposit address
+        to_deposit_tx = possible_deposit_tx[possible_deposit_tx['Sender'] == start_tx['Receiver']]
+        for index, deposit_tx in to_deposit_tx.iterrows():
+            tempObj = TripleEdge(start_tx, deposit_tx)
             edge_set.append(tempObj)
 
-    return edge_set
+    return edge_set, possible_deposits
 
 # dictionary based dfs
 def wcc(G):
@@ -113,24 +114,50 @@ def wcc(G):
     return comp_num, components
     
     
-
-def dar_heuristic_alg(edges, a_max=1, t_max=10000):
+def dar_heuristic_alg(edges, deposit_addr_list, a_max=1, t_max=10000):
     exchange_entities = {}
     user_entities = {}
 
     for edge in edges:
-        if edge.type_1 = edge.type_2 and edge.value_1 - edge.value_2 <= a_max and edge.block_2 - edge.block_1 <= t_max:
+        if edge.type_1 == edge.type_2 and edge.value_1 - edge.value_2 <= a_max and edge.block_2 - edge.block_1 <= t_max:
             exchange_entities.setdefault(edge.deposit, []).append(edge.exchange)
             exchange_entities.setdefault(edge.exchange, []).append(edge.deposit)
             user_entities.setdefault(edge.sender, []).append(edge.deposit)
             user_entities.setdefault(edge.deposit, []).append(edge.sender)
     
     num_exchange, exchange_map = wcc(exchange_entities)
-    num_user, user_map = wcc(exchange_entities)
+    num_user, user_map = wcc(user_entities)
+    user_map = {key: value for key, value in user_map.items() if key not in deposit_addr_list}
 
     return num_exchange, exchange_map, num_user, user_map
 
-# trans, miner = generate_transaction_data(API_KEY, 21109541, 21109600) # 21109565)
-trans="trans_test.csv"
-miner = "miner_test.csv"
-edges = generate_triple_paths(API_KEY, trans, "data-collection/centralized_exchanges_data.csv", miner)
+def start():
+    block_start = int(input('Start Block: '))
+    block_end = int(input('End Block: '))
+
+    exchanges = input("Exchange file (leave empty if default): ") or "data-collection/centralized_exchanges_data.csv"
+    amount_diff = float(input('Amount difference maximum: ') or 0.01)
+    block_diff = int(input('Block difference maximum: ') or 3200)
+
+    transactions, miners = generate_transaction_data(API_KEY, block_start, block_end)
+    edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
+
+    print('Graph generated. Running deposit address reuse heuristic...')
+
+    num_ex, exchange_out, num_users, user_out = dar_heuristic_alg(edges, deposit_addr_list, amount_diff, block_diff)
+
+    print("Exchanges identified: ", num_ex)
+    print("Users identified: ", num_users)
+
+start()
+
+##### TESTING #####
+# tx_file = 'test_tx.csv'
+# ex_file = 'test_ex.csv'
+# miner_file = 'miner_test.csv'
+# edge_test, deposits_test = generate_triple_paths(API_KEY, tx_file, ex_file, miner_file)
+# num_ex, ex, num_u, u = dar_heuristic_alg(edge_test, deposits_test.tolist())
+# print("Exchanges found:", num_ex)
+# print("Users found:", num_u)
+
+# print(u)
