@@ -5,6 +5,15 @@ This program implements the deposit address reuse heuristic described by Friedhe
 1. `centralized_exchanges_data.csv`: originally sourced from [etherclust](https://github.com/etherclust/etherclust/blob/master/data/exchanges.csv) and expanded based on data from Etherscan, contains addresses associated with large exchanges.
 2. `dex_data.csv`: contains addresses associated with decentralized exchanges. Sourced from Etherscan.
 
+## Installation
+1. Clone the repository with `git clone https://github.com/ccs-cs1l-f24/ethereum-clustering.git`
+2. Install dependencies:
+   - [pandas](https://pandas.pydata.org/)
+   - [aiohttp](https://docs.aiohttp.org/en/stable/index.html)
+   - [asyncio](https://docs.python.org/3/library/asyncio.html)
+   - [collections](https://docs.python.org/3/library/collections.html)
+   - [matplotlib](https://matplotlib.org/)
+
 ## Functionality
 `start <min-block> <max-block> <exchange-file (optional)> <amount-difference-max (optional)> <block-difference-max (optional)>`
 - **Description:** Compiles transaction data from `<min-block>` to `<max-block>` and runs clustering heuristic
