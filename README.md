@@ -14,7 +14,8 @@ This program implements the deposit address reuse heuristic described by Friedhe
    - [collections](https://docs.python.org/3/library/collections.html)
    - [matplotlib](https://matplotlib.org/)
 
-## Functionality
+## Usage
+To run the program, run `python3 Code-Files/deposit_addr_reuse.py` followed by one of the following commands:
 `start <min-block> <max-block> <exchange-file (optional)> <amount-difference-max (optional)> <block-difference-max (optional)>`
 - **Description:** Compiles transaction data from `<min-block>` to `<max-block>` and runs clustering heuristic
 - **Parameters:**
