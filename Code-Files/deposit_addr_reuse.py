@@ -8,7 +8,7 @@ from collections import Counter
 import time
 import sys
 
-API_KEY = "BIYUJTNDT1C26ZIEP1YWT2AXUHFXVN5683"
+API_KEY = ""
 
 class Transaction:
     def __init__(self, block, sender, receiver, value, type):
