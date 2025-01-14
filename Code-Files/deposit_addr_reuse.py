@@ -7,9 +7,11 @@ import matplotlib.pyplot as plt
 from collections import Counter
 import time
 import sys
+from config import api_key
 
-API_KEY = ""
+API_KEY = api_key
 
+# this is an edge of the graph
 class Transaction:
     def __init__(self, block, sender, receiver, value, type):
         self.block = block
@@ -18,6 +20,7 @@ class Transaction:
         self.value = value
         self.type = type
 
+# parts of the graph we are interested in
 class TripleEdge:
     def __init__(self, tx1, tx2):
         self.sender = tx1['Sender']

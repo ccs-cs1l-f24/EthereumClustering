@@ -1,0 +1,5 @@
+# Ignore the virtual environment directory
+clustering-venv/
+
+# Ignore the config.py file
+config.py
