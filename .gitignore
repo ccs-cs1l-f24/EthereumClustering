@@ -2,4 +2,4 @@
 clustering-venv/
 
 # Ignore the config.py file
-config.py
+ethereum-clustering/Code-Files/config.py

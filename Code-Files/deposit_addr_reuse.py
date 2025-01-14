@@ -1,13 +1,16 @@
 import csv
+import httpx
 import requests as req
 import pandas as pd
 import asyncio
 import aiohttp
+import aiometer
 import matplotlib.pyplot as plt
 from collections import Counter
 import time
 import sys
 from config import api_key
+from functools import partial
 
 API_KEY = api_key
 
@@ -39,32 +42,69 @@ class TripleEdge:
     def __repr__(self):
         return 'Starting Address:\t' + self.sender + '\nDeposit Address:\t' + self.deposit + '\nExchange Address:\t' + self.exchange
 
+# client = httpx.AsyncClient()
+# >>>
+# >>> async def fetch(client, request):
+# ...     response = await client.send(request)
+# ...     # Simulate extra processing...
+# ...     await asyncio.sleep(2 * random.random())
+# ...     return response.json()["json"]
+# ...
+# >>> requests = [
+# ...     httpx.Request("POST", "https://httpbin.org/anything", json={"index": index})
+# ...     for index in range(100)
+# ... ]
 
-async def process_api_request(session, block_num, api_key, semaphore):
-    async with semaphore:
-        url = ("https://api.etherscan.io/api?" +
-                "module=proxy" + 
-                "&action=eth_getBlockByNumber" +
-                "&tag=" + hex(block_num) +
-                "&boolean=true" + 
-                "&apikey=" + api_key)
-        async with session.get(url) as response:
-            return await response.json()
+# jobs = [functools.partial(fetch, client, request) for request in requests]
+# >>> results = await aiometer.run_all(jobs, max_at_once=10, max_per_second=5)
 
-async def run_concurrent_requests(api_key, min_block, max_block):
-    async with aiohttp.ClientSession() as session:
-        semaphore = asyncio.Semaphore(5)
-        tasks = []
+semaphore = asyncio.Semaphore(4)  # Maximum of 5 concurrent requests
 
-        for block_tag in range(min_block, max_block):
-            task = asyncio.create_task(process_api_request(session, block_tag, api_key, semaphore))
-            tasks.append(task)
-            await asyncio.sleep(1)
+async def process_api_request(client, block_num, api_key=API_KEY):
+    """Fetch block data from the API."""
+    print(block_num)
+    url = f"https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag={hex(block_num)}&boolean=true&apikey={api_key}"
+    # async with semaphore:
+    response = await client.get(url)
+    return response.json()
 
-        return await asyncio.gather(*tasks, return_exceptions=True)
+async def run_concurrent_requests(min_block, max_block, client):
+    """Run multiple API requests concurrently using aiometer."""
+    # Create a list of requests
+    jobs = [partial(process_api_request, client, block_num) for block_num in range(min_block, max_block)]
+    
+    # Use aiometer to handle concurrency with limits on requests at once and requests per second
+    tasks = await aiometer.run_all(jobs, max_at_once=1, max_per_second=4)
+    # await asyncio.sleep(1)
 
-def generate_transaction_data(min_block, max_block, api_key=API_KEY):
-    tasks = asyncio.run(run_concurrent_requests(api_key, min_block, max_block))
+    return tasks
+
+# async def process_api_request(session, block_num, api_key=API_KEY):
+#     url = ("https://api.etherscan.io/api?" +
+#             "module=proxy" + 
+#             "&action=eth_getBlockByNumber" +
+#             "&tag=" + hex(block_num) +
+#             "&boolean=true" + 
+#             "&apikey=" + api_key)
+#     async with session.get(url) as response:
+#         return await response.json()
+
+# async def run_concurrent_requests(min_block, max_block):
+#     async with aiohttp.ClientSession() as session:
+
+#         jobs = [partial(process_api_request, session, block_num) for block_num in range(min_block, max_block)]
+#         tasks = await aiometer.run_all(
+#             jobs,
+#             max_per_second=5
+#         )
+
+#         return tasks
+
+    
+async def generate_transaction_data(min_block, max_block, api_key=API_KEY):
+    async with httpx.AsyncClient() as client:
+        tasks = await run_concurrent_requests(min_block, max_block, client)
+    print('ran tasks', len(tasks))
 
     transactions = []
     miners = []
@@ -179,7 +219,7 @@ def generate_bar_chart(user_dict):
 def start_complete(block_start, block_end, exchanges="data-collection/centralized_exchanges_data.csv", amount_diff=0.01, block_diff=3200):
     start_time = time.time()
     
-    transactions, miners = generate_transaction_data(block_start, block_end)
+    transactions, miners = asyncio.run(generate_transaction_data(block_start, block_end))
     print("Data retrieved. Building graph...")
 
     edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
@@ -247,23 +287,26 @@ if sys.argv[1] == '-h':
 elif sys.argv[1] == 'csv' and len(sys.argv) == 2:
     try:
         start_from_csv(int(sys.argv[2]), int(sys.argv[3]))
-    except:
+    except Exception as e:
         print('Error... try again')
+        print(e)
 elif sys.argv[1] == 'start':
     try:
         if len(sys.argv) == 6:
-            start_complete(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6])
+            start_complete(int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6])
         else:
-            start_complete(sys.argv[2], sys.argv[3])
-    except:
+            start_complete(int(sys.argv[2]), int(sys.argv[3]))
+    except Exception as e:
         print('Error... try again')
+        print(e)
 elif sys.argv[1] == 'tx':
     try:
         generate_transaction_data(int(sys.argv[2]), int(sys.argv[3]))
-    except:
+    except Exception as e:
         print('Error... try again')
+        print(e)
 else:
-    print('Error... try again')
+    print('Error with input... try again')
 
 #### TESTING #####
 # tx_file = 'test_tx.csv'
