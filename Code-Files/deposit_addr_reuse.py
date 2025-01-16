@@ -42,63 +42,20 @@ class TripleEdge:
     def __repr__(self):
         return 'Starting Address:\t' + self.sender + '\nDeposit Address:\t' + self.deposit + '\nExchange Address:\t' + self.exchange
 
-# client = httpx.AsyncClient()
-# >>>
-# >>> async def fetch(client, request):
-# ...     response = await client.send(request)
-# ...     # Simulate extra processing...
-# ...     await asyncio.sleep(2 * random.random())
-# ...     return response.json()["json"]
-# ...
-# >>> requests = [
-# ...     httpx.Request("POST", "https://httpbin.org/anything", json={"index": index})
-# ...     for index in range(100)
-# ... ]
-
-# jobs = [functools.partial(fetch, client, request) for request in requests]
-# >>> results = await aiometer.run_all(jobs, max_at_once=10, max_per_second=5)
-
-semaphore = asyncio.Semaphore(4)  # Maximum of 5 concurrent requests
+semaphore = asyncio.Semaphore(4)
 
 async def process_api_request(client, block_num, api_key=API_KEY):
-    """Fetch block data from the API."""
     print(block_num)
     url = f"https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag={hex(block_num)}&boolean=true&apikey={api_key}"
-    # async with semaphore:
     response = await client.get(url)
+
     return response.json()
 
 async def run_concurrent_requests(min_block, max_block, client):
-    """Run multiple API requests concurrently using aiometer."""
-    # Create a list of requests
     jobs = [partial(process_api_request, client, block_num) for block_num in range(min_block, max_block)]
-    
-    # Use aiometer to handle concurrency with limits on requests at once and requests per second
     tasks = await aiometer.run_all(jobs, max_at_once=1, max_per_second=4)
-    # await asyncio.sleep(1)
 
     return tasks
-
-# async def process_api_request(session, block_num, api_key=API_KEY):
-#     url = ("https://api.etherscan.io/api?" +
-#             "module=proxy" + 
-#             "&action=eth_getBlockByNumber" +
-#             "&tag=" + hex(block_num) +
-#             "&boolean=true" + 
-#             "&apikey=" + api_key)
-#     async with session.get(url) as response:
-#         return await response.json()
-
-# async def run_concurrent_requests(min_block, max_block):
-#     async with aiohttp.ClientSession() as session:
-
-#         jobs = [partial(process_api_request, session, block_num) for block_num in range(min_block, max_block)]
-#         tasks = await aiometer.run_all(
-#             jobs,
-#             max_per_second=5
-#         )
-
-#         return tasks
 
     
 async def generate_transaction_data(min_block, max_block, api_key=API_KEY):
@@ -142,7 +99,7 @@ async def generate_transaction_data(min_block, max_block, api_key=API_KEY):
     return str(min_block) + '_to_' + str(max_block) + '_' + "transactions.csv", str(min_block) + '_to_' + str(max_block) + '_' + "miners.csv"
 
 
-def generate_triple_paths(api_key, transactions_file, exchange_file, miner_file):
+def generate_triple_paths(transactions_file, exchange_file, miner_file):
     # import and filter data
     addr_exchanges = pd.read_csv(exchange_file)[' address'].str.lower()
     addr_miners = pd.read_csv(miner_file)
@@ -222,7 +179,7 @@ def start_complete(block_start, block_end, exchanges="data-collection/centralize
     transactions, miners = asyncio.run(generate_transaction_data(block_start, block_end))
     print("Data retrieved. Building graph...")
 
-    edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
+    edges, deposit_addr_list = generate_triple_paths(transactions, exchanges, miners)
     print('Graph generated. Running deposit address reuse heuristic...')
 
     num_ex, exchange_out, num_users, user_out = dar_heuristic_alg(edges, deposit_addr_list, amount_diff, block_diff)
@@ -243,6 +200,37 @@ def start_complete(block_start, block_end, exchanges="data-collection/centralize
 
     print("Runtime:", end_time - start_time)
 
+def sync_gather_val_api(addr, api_key=API_KEY):
+    url = f"https://api.etherscan.io/v2/api?chainid=1&module=account&action=balance&address={addr}&tag=latest&apikey={api_key}"
+    call = req.get(url)
+    return float(call.json().get('result'))
+
+async def gather_val_api(client, addr, api_key=API_KEY):
+    url = f"https://api.etherscan.io/v2/api?chainid=1&module=account&action=balance&address={addr}&tag=latest&apikey={api_key}"
+    call = await client.get(url)
+    return float(call.json().get('result'))
+
+async def run_requests(client, label, df, api_key=API_KEY):
+    jobs = [partial(gather_val_api, client, addr) for addr in df[label]]
+    tasks = await aiometer.run_all(jobs, max_per_second=5)
+    return tasks
+
+async def gather_user(start_addr, user_map_file, api_key=API_KEY):
+    df = pd.read_csv(user_map_file)
+    value = 0
+
+    # if we find that user in a column, sum the column value and return
+    for label in df.columns:
+        if (df[label] == start_addr).any():
+            async with httpx.AsyncClient() as client:
+                tasks = await run_requests(client, label, df)
+            value = sum(tasks)
+            return value
+
+    # if not found, just return the value of that one account
+    value += sync_gather_val_api(start_addr)
+    return value
+
 def start_from_csv(transactions, miners):
     start_time = time.time()
 
@@ -250,7 +238,7 @@ def start_from_csv(transactions, miners):
     amount_diff = float(input('Amount difference maximum (leave empty if default): ') or 0.01)
     block_diff = int(input('Block difference maximum (leave empty if default): ') or 3200)
 
-    edges, deposit_addr_list = generate_triple_paths(API_KEY, transactions, exchanges, miners)
+    edges, deposit_addr_list = generate_triple_paths(transactions, exchanges, miners)
     print('Graph generated. Running deposit address reuse heuristic...')
 
     num_ex, exchange_out, num_users, user_out = dar_heuristic_alg(edges, deposit_addr_list, amount_diff, block_diff)
@@ -272,7 +260,6 @@ def start_from_csv(transactions, miners):
 
     print("Runtime:", end_time - start_time)
 
-# start_from_csv('5000000_to_5001000_transactions.csv', '5000000_to_5001000_miners.csv')
 
 
 if sys.argv[1] == '-h':
@@ -284,9 +271,9 @@ if sys.argv[1] == '-h':
     print('tx <min-block> <max-block>')
     print('\t Compiles transaction data from <min-block> to <max-block>')
     print('============================================')
-elif sys.argv[1] == 'csv' and len(sys.argv) == 2:
+elif sys.argv[1] == 'csv' and len(sys.argv) == 4:
     try:
-        start_from_csv(int(sys.argv[2]), int(sys.argv[3]))
+        start_from_csv(sys.argv[2], sys.argv[3])
     except Exception as e:
         print('Error... try again')
         print(e)
